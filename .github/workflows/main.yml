@@ -1,0 +1,21 @@
+name: Keyword Check
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes
+  workflow_dispatch:          # manual run button in GitHub UI
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install playwright requests
+      - run: playwright install chromium
+      - run: python check_page.py
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          CHECK_URL: ${{ secrets.CHECK_URL }}
+          CONSENT_SELECTOR: ${{ secrets.CONSENT_SELECTOR }}
+          KEYWORDS: ${{ secrets.KEYWORDS }}
