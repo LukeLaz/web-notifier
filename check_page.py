@@ -20,11 +20,12 @@ def notify(msg):
     )
 
 def find_keyword_context(text, keyword, context=50):
+    """Return snippet(s) around keyword match."""
     matches = []
     for m in re.finditer(re.escape(keyword), text):
         start = max(0, m.start() - context)
         end = min(len(text), m.end() + context)
-        snippet = text[start:end].replace("\n", " ")
+        snippet = text[start:end].replace("\n", " ").strip()
         matches.append(snippet)
     return matches
 
@@ -49,54 +50,58 @@ def extract_text():
         return text
 
 def calc_hash(data):
-    """Hash a dictionary of matches for quick diffing."""
+    """Hash structure to detect identical results quickly."""
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 def run_check():
     ul_text = extract_text()
-    found = {}
-    for k in KEYWORDS:
-        contexts = find_keyword_context(ul_text, k)
-        if contexts:
-            found[k] = contexts
 
-    # load last run
-    prev = {}
+    # Collect keyword + context pairs
+    found_pairs = []
+    for k in KEYWORDS:
+        for snippet in find_keyword_context(ul_text, k):
+            found_pairs.append({"keyword": k, "context": snippet})
+
+    # Load previous matches
+    prev_pairs = []
     if pathlib.Path(STATE_FILE).exists():
         with open(STATE_FILE, "r") as f:
-            prev = json.load(f)
+            prev_pairs = json.load(f)
 
-    # compare hashes
-    old_hash, new_hash = calc_hash(prev), calc_hash(found)
-    if old_hash == new_hash:
-        print("🟢 No new keyword matches since last run.")
+    # Build set of (keyword + snippet) for fast diff
+    prev_set = {f"{x['keyword']}::{x['context']}" for x in prev_pairs}
+    new_set = {f"{x['keyword']}::{x['context']}" for x in found_pairs}
+
+    new_only = new_set - prev_set
+
+    if not new_only:
+        print("🟢 No new keyword/context combinations since last run.")
         return
 
-    # compose message with new findings
-    message_lines = [f"✅ New keyword(s) found on {URL}:"]
-    for k, contexts in found.items():
-        if k not in prev:
-            message_lines.append(f"\n🔹 *{k}* ({len(contexts)}x NEW)")
-        else:
-            # only report new snippets
-            new_snips = [c for c in contexts if c not in prev[k]]
-            if new_snips:
-                message_lines.append(f"\n🔹 *{k}* ({len(new_snips)} new)")
-                for snippet in new_snips[:3]:
-                    message_lines.append(f"    …{textwrap.shorten(snippet, width=120)}…")
+    # Prepare message for Telegram
+    message_lines = [f"✅ New matches found on {URL}:"]
+    for entry in new_only:
+        keyword, context = entry.split("::", 1)
+        message_lines.append(f"\n🔹 *{keyword}*")
+        message_lines.append(f"    …{textwrap.shorten(context, width=120)}…")
+
     msg = "\n".join(message_lines)
     print(msg)
     notify(msg)
 
-    # save new state
-    with open(STATE_FILE, "w") as f:
-        json.dump(found, f, indent=2)
+    # Save new state (all unique seen so far)
+    combined = list({e for e in prev_set | new_set})  # union
+    # convert back to list of dicts
+    all_pairs = [{"keyword": s.split("::", 1)[0], "context": s.split("::", 1)[1]} for s in combined]
 
-    # commit updated state back to repo
+    with open(STATE_FILE, "w") as f:
+        json.dump(all_pairs, f, indent=2)
+
+    # Commit new state back to repo
     subprocess.run(["git", "config", "user.email", "bot@github.com"])
     subprocess.run(["git", "config", "user.name", "GitHub Action Bot"])
     subprocess.run(["git", "add", STATE_FILE])
-    subprocess.run(["git", "commit", "-m", "update last_matches"] , check=False)
+    subprocess.run(["git", "commit", "-m", "update last_matches"], check=False)
     subprocess.run(["git", "push"])
     print("💾 Updated last_matches.json in repository.")
 
