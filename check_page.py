@@ -18,7 +18,7 @@ def notify(msg):
         timeout=10
     )
 
-def find_keyword_context(text, keyword, context=50):
+def find_keyword_context(text, keyword, context=100):
     """Return snippet around found keyword."""
     matches = []
     for m in re.finditer(re.escape(keyword), text):
